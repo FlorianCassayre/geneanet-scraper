@@ -1,4 +1,4 @@
-name := "gscraper.geneanet-scraper"
+name := "geneanet-scraper"
 
 version := "0.1"
 

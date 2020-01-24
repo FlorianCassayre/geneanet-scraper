@@ -55,7 +55,7 @@ package object genealogy {
     def event(eventType: EventType): Option[Event] = events.find(_.eventType == eventType)
   }
 
-  case class Person(name: String, surname: String, sex: Sex, events: Seq[Event], occupation: Option[String]) extends WithEvents {
+  case class Person[I](id: I, name: String, surname: String, sex: Sex, events: Seq[Event], occupation: Option[String]) extends WithEvents {
     def birth: Option[Event] = event(EventBirth)
     def birthOrBaptism: Option[Event] = birth.orElse(event(EventBaptism))
     def death: Option[Event] = event(EventDeath)
@@ -71,5 +71,7 @@ package object genealogy {
   case object EventBaptism extends EventType
   case object EventBurial extends EventType
   case object EventMarriage extends EventType
+
+  case class GenealogicalTree[I](persons: Seq[Person[I]], families: Seq[Family[I]])
 
 }

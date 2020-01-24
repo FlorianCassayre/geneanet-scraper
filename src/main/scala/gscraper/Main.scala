@@ -1,11 +1,16 @@
 package gscraper
 
-import gscraper.actor.Messages.ScrapingRequest
-import gscraper.actor.Actors
+import gscraper.actor.GeneanetScraper
 
 object Main extends App {
 
-  // Initial message
-  Actors.dataKeeper ! ScrapingRequest("https://gw.geneanet.org/gntstarmacrone?lang=fr&pz=emmanuel+jean+michel+frederic&nz=macron&p=emmanuel+jean+michel+frederic&n=macron", 1)
+  val cookieValue = ""
+  val url = "https://gw.geneanet.org/gntstarmacrone?lang=fr&pz=emmanuel+jean+michel+frederic&nz=macron&p=emmanuel+jean+michel+frederic&n=macron"
+
+  GeneanetScraper.scrape(url, cookieValue){ tree =>
+    import gscraper.gedcom.GedcomUtils._
+
+    writeGedcom(toGedcom(tree), "test3.ged")
+  }
 
 }

@@ -10,7 +10,7 @@ object GeneanetUtils {
 
   type Id = String // A hopefully unique URL, for now
 
-  case class GeneanetIndividual(person: Person, families: Seq[Family[Id]], fatherUrl: Option[Id], motherUrl: Option[Id], children: Seq[Id])
+  case class GeneanetIndividual(person: Person[Id], families: Seq[Family[Id]], fatherUrl: Option[Id], motherUrl: Option[Id], children: Seq[Id])
 
   def scrape(url: String)(implicit browser: Browser): GeneanetIndividual = {
     val doc = browser.get(url)
@@ -86,7 +86,7 @@ object GeneanetUtils {
       }
     }
 
-    val person = Person(name, surname, sex, eventsFlat, otherInformations)
+    val person = Person(url, name, surname, sex, eventsFlat, otherInformations)
 
     GeneanetIndividual(person, unions, fatherUrl, motherUrl, childrenSub.flatten)
   }
