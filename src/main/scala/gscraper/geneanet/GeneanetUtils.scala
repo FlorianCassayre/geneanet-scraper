@@ -9,6 +9,8 @@ import scalaj.http.HttpRequest
 import spray.json._
 import DefaultJsonProtocol._
 
+import scala.util.{Failure, Success, Try}
+
 object GeneanetUtils {
 
   type Id = String // A hopefully unique URL, for now
@@ -16,7 +18,23 @@ object GeneanetUtils {
   case class GeneanetIndividual(person: Person[Id], families: Seq[Family[Id]], fatherUrl: Option[Id], motherUrl: Option[Id], children: Seq[Id])
 
   def scrape(url: String, requestBuilder: String => HttpRequest)(implicit browser: Browser): GeneanetIndividual = {
-    val response = requestBuilder(url).asString
+    def withRetry[T](n: Int, wait: Long, coefficient: Long)(f: () => T): T = {
+      Try(f()) match {
+        case Success(value) => value
+        case Failure(exception) =>
+          if(n > 0) {
+            println("Failure:")
+            exception.printStackTrace()
+            println(s"Retrying in ${wait}ms...")
+            Thread.sleep(wait)
+            withRetry(n - 1, wait * coefficient, coefficient)(f)
+          } else {
+            throw new Exception(exception)
+          }
+      }
+    }
+
+    val response = withRetry(5, 1000, 2)(() => requestBuilder(url).asString)
     val doc = browser.parseString(response.body)
 
     // TODO (doc >?> element("div#person-title")).isEmpty
