@@ -1,10 +1,9 @@
 package gscraper.gedcom
 
 import java.io.File
-
 import gscraper.genealogy._
 import org.folg.gedcom._
-import org.folg.gedcom.model.{ChildRef, Gedcom, SpouseRef}
+import org.folg.gedcom.model.{ChildRef, EventFact, Gedcom, SpouseRef}
 
 object GedcomUtils {
 
@@ -13,7 +12,7 @@ object GedcomUtils {
     var idCounter = 0
     var urlIdMap: Map[String, Int] = Map.empty
 
-    def getOrCreateId(url: String): Int = {
+    def getOrCreateIndividualId(url: String): Int = {
       if(urlIdMap.contains(url)) {
         urlIdMap(url)
       } else {
@@ -34,8 +33,8 @@ object GedcomUtils {
     charset.setValue("UTF-8")
     header.setCharacterSet(charset)
     val generator = new model.Generator()
-    generator.setValue("gscraper.geneanet-scraper")
-    generator.setName("gscraper.geneanet-scraper")
+    generator.setValue("geneanet-scraper")
+    generator.setName("geneanet-scraper")
     generator.setVersion("0.1")
     header.setGenerator(generator)
     gedcom.setHeader(header)
@@ -84,20 +83,50 @@ object GedcomUtils {
       event
     }
 
+    var mediaIdCounter = 0
+    var mediaSrcMap: Map[String, String] = Map.empty
+    var mediaSrc: Seq[Media] = Seq.empty
+
     for(individual <- tree.persons) {
-      val id = getOrCreateId(individual.id)
+      val id = getOrCreateIndividualId(individual.id)
       val person = new model.Person()
       person.setId(idFormat("I", id))
-      // sex
+
+      val sexEventFact = new EventFact()
+      sexEventFact.setTag("SEX")
+      sexEventFact.setValue(individual.sex match {
+        case SexMale => "M"
+        case SexFemale => "F"
+        case SexUnknown => "U"
+      })
+      person.addEventFact(sexEventFact)
+
       val names = new model.Name()
+      names.setValue(s"${individual.name} /${individual.surname}/") // This is the important part
       names.setGiven(individual.name)
       names.setSurname(individual.surname)
       person.addName(names)
+
       individual.occupation.foreach{ occ =>
         val occupation = new model.EventFact()
         occupation.setTag("OCCU")
         occupation.setValue(occ)
         person.addEventFact(occupation)
+      }
+
+      individual.medias.foreach { media =>
+        val id = if(!mediaSrcMap.contains(media.src)) {
+            val allocated = idFormat("M", mediaIdCounter)
+            mediaSrcMap += media.src -> allocated
+            mediaIdCounter += 1
+            mediaSrc :+= media
+            allocated
+          } else {
+            mediaSrcMap(media.src)
+          }
+        val med = new model.MediaRef()
+        med.setRef(id)
+        person.addMediaRef(med)
       }
 
       individual.events.foreach{ ev =>
@@ -128,6 +157,17 @@ object GedcomUtils {
       }
 
       gedcom.addFamily(family)
+    }
+
+    for(media <- mediaSrc) {
+      val id = mediaSrcMap(media.src)
+      val med = new model.Media()
+      med.setId(id)
+      med.setFormat(media.src.split("\\.").last.toLowerCase)
+      med.setFile(media.src)
+      med.setTitle(media.title)
+      med.setFileTag("FILE")
+      gedcom.addMedia(med)
     }
 
     gedcom

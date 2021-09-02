@@ -5,6 +5,9 @@ import net.ruippeixotog.scalascraper.browser.Browser
 import net.ruippeixotog.scalascraper.dsl.DSL.Extract._
 import net.ruippeixotog.scalascraper.dsl.DSL._
 import net.ruippeixotog.scalascraper.model._
+import scalaj.http.HttpRequest
+import spray.json._
+import DefaultJsonProtocol._
 
 object GeneanetUtils {
 
@@ -12,10 +15,19 @@ object GeneanetUtils {
 
   case class GeneanetIndividual(person: Person[Id], families: Seq[Family[Id]], fatherUrl: Option[Id], motherUrl: Option[Id], children: Seq[Id])
 
-  def scrape(url: String)(implicit browser: Browser): GeneanetIndividual = {
-    val doc = browser.get(url)
+  def scrape(url: String, requestBuilder: String => HttpRequest)(implicit browser: Browser): GeneanetIndividual = {
+    val response = requestBuilder(url).asString
+    val doc = browser.parseString(response.body)
 
     // TODO (doc >?> element("div#person-title")).isEmpty
+
+    //println(doc)
+    val blacklistTitle = (doc >> elementList("h1")).find(e => e.text == "Navigation inhabituelle")
+    if(blacklistTitle.nonEmpty) {
+      val form = blacklistTitle.get.parent >> element(".panel > .row > div > form")
+      println(form.get.outerHtml)
+      throw new Exception("Captcha")
+    }
 
     val personTitleElement = doc >> element("div#person-title")
     val personGeneralElement = personTitleElement >> element("div.columns > h1")
@@ -25,7 +37,7 @@ object GeneanetUtils {
     val sex = personGeneralElement >> attr("title")("img") match {
       case "H" => SexMale
       case "F" => SexFemale
-      // TODO add unknown sex
+      case "?" => SexUnknown
     }
 
     val (name: String, surname: String) = (personGeneralElement >> elementList("a:not(.edit-button-action)")).map(_.text) match {
@@ -71,7 +83,7 @@ object GeneanetUtils {
 
         val children = (li >> elementList(":not(div) > ul > li")).map(firstPersonLink)
 
-        (Family(father, mother, eventOpt.toSeq, Seq.empty), children) // We don't include children yet (thus Seq.empty)
+        (Family(father, mother, eventOpt.toSeq, children), children) // We don't include children yet (thus Seq.empty)
       }
     }.unzip
 
@@ -86,7 +98,17 @@ object GeneanetUtils {
       }
     }
 
-    val person = Person(url, name, surname, sex, eventsFlat, otherInformations)
+    val jsonMetadata = (doc >> elementList("script")).map(_.innerHtml).filter(_.contains("MODE_VISITOR")).head
+      .split("elements, ")(1).split("\\);").head
+      .parseJson.asJsObject
+    val medias = jsonMetadata.fields("gntGeneweb").asJsObject.fields("media").convertTo[Seq[JsObject]].map { mediaData =>
+      val srcRaw = mediaData.fields("src").convertTo[String]
+      assert(srcRaw.startsWith("//gw.geneanet.org/") && srcRaw.matches(".*/medium\\.(jpg|JPG|png|PNG)\\?t=\\d+$"), srcRaw) // Hackish
+      val src = "https:" + srcRaw.split("\\?").head.replace("/medium.", "/normal.")
+      Media(mediaData.fields("title").convertTo[String], src)
+    }
+
+    val person = Person(url, name, surname, sex, eventsFlat, otherInformations, medias)
 
     GeneanetIndividual(person, unions, fatherUrl, motherUrl, childrenSub.flatten)
   }
@@ -95,11 +117,11 @@ object GeneanetUtils {
 
   def parseEventIndividual(string: String): Option[Event] = {
     def parseEventType(str: String): Option[EventType] = str match {
-      case "Né" | "Née" => Some(EventBirth)
-      case "Décédé" | "Décédée" => Some(EventDeath)
-      case "Baptisé" | "Baptisée" => Some(EventBaptism)
-      case "Inhumé" | "Inhumée" => Some(EventBurial)
-      case _=> None
+      case "Né" | "Née" | "Né(e)" => Some(EventBirth)
+      case "Décédé" | "Décédée" | "Décédé(e)" => Some(EventDeath)
+      case "Baptisé" | "Baptisée" | "Baptisé(e)" => Some(EventBaptism)
+      case "Inhumé" | "Inhumée" | "Inhumé(e)" => Some(EventBurial)
+      case _ => None
     }
 
     string.split(" ", 2).toSeq match {

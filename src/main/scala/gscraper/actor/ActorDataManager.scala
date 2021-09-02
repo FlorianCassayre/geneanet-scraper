@@ -1,15 +1,17 @@
 package gscraper.actor
 
-import java.io.File
-
 import akka.actor.Actor
 import gscraper.actor.Messages._
 import gscraper.genealogy._
-import org.folg.gedcom.model.{ChildRef, Gedcom, SpouseRef}
 
 class ActorDataManager(scraper: GeneanetScraper) extends Actor {
 
   var pending = 0
+  var forceExit = false
+
+  val visitAncestors = true
+  val visitDescendants = true
+  val visitSpouse = true
 
   // TODO create handler for that
   var personOrder: Seq[String] = Vector.empty
@@ -17,9 +19,13 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
   var familyOrder: Seq[(String, String)] = Vector.empty
   var families: Map[(String, String), Family[String]] = Map.empty
 
+  var scraping: Set[String] = Set.empty
+
   private def forwardRequest(request: ScrapingRequest): Unit = {
-    if(!persons.contains(request.url) && persons.size <= 100) {
+    val id = request.url
+    if(!persons.contains(id) && !scraping.contains(id)) { // persons.size <= 100
       pending += 1
+      scraping += id
       scraper.scraperRouter ! request
     }
   }
@@ -29,8 +35,9 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
       forwardRequest(request)
 
     case result: ScrapingResult => // Callback
-      println("[" + pending + "] Received " + result.sosa + "\t" + result.result.person)
+      println(s"[I: ${persons.size}, F: ${families.size}, I': ${pending}] Received ${result.result.person}")
       pending -= 1
+      scraping -= result.url
 
       personOrder :+= result.url
       persons += result.url -> result.result.person
@@ -48,11 +55,22 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
         }
       }
 
-      result.result.fatherUrl.foreach(url => forwardRequest(ScrapingRequest(url, result.sosa * 2)))
-      result.result.motherUrl.foreach(url => forwardRequest(ScrapingRequest(url, result.sosa * 2 + 1)))
+      val res = result.result
+      if(visitAncestors) {
+        Seq(res.fatherUrl, res.motherUrl).flatten.foreach(url => forwardRequest(ScrapingRequest(url)))
+      }
+
+      if(visitDescendants) {
+        res.children.foreach(url => forwardRequest(ScrapingRequest(url)))
+      }
+
+      if(visitSpouse) {
+        res.families.flatMap(fam => Seq(fam.father, fam.mother)).foreach(url => forwardRequest(ScrapingRequest(url)))
+      }
 
       checkDone()
     case fail: ScrapingFailure =>
+      forceExit = true // Force program exit
       pending -= 1
 
       println("FAIL: " + fail.url)
@@ -64,7 +82,7 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
   var done = false
 
   def checkDone(): Unit = {
-    if(pending == 0) { // Job done
+    if(pending == 0 || forceExit) { // Job done
       if(done) {
         throw new IllegalStateException("Done was called twice")
       }
@@ -74,6 +92,7 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
 
       scraper.callback(tree)
 
+      println("Job done. Exiting.")
       System.exit(0) // TODO
     }
   }
