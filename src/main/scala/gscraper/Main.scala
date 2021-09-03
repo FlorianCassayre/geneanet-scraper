@@ -6,9 +6,18 @@ object Main extends App {
 
   val cookieValue = ""
   val userAgent = ""
-  val url = "https://gw.geneanet.org/gntstarmacrone?lang=fr&pz=emmanuel+jean+michel+frederic&nz=macron&p=emmanuel+jean+michel+frederic&n=macron"
+  val url = ""
 
-  GeneanetScraper.scrape(url, cookieValue, userAgent){ tree =>
+  assert(url.contains("lang=fr"), "The initial URL must use the French locale")
+
+  val pathMatcher = "A*D*S?".r
+
+  "" match {
+    case pathMatcher(_*) => ()
+    case _ => throw new Exception()
+  }
+
+  GeneanetScraper.scrape(url, cookieValue, userAgent, pathMatcher){ tree =>
     import gscraper.gedcom.GedcomUtils._
 
     writeGedcom(toGedcom(tree), "test5.ged")

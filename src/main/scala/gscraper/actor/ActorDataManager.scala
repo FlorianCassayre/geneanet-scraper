@@ -6,12 +6,12 @@ import gscraper.genealogy._
 
 class ActorDataManager(scraper: GeneanetScraper) extends Actor {
 
+  val TokenAncestor: Char = 'A'
+  val TokenDescendant: Char = 'D'
+  val TokenSpouse: Char = 'S'
+
   var pending = 0
   var forceExit = false
-
-  val visitAncestors = true
-  val visitDescendants = true
-  val visitSpouse = true
 
   // TODO create handler for that
   var personOrder: Seq[String] = Vector.empty
@@ -23,7 +23,11 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
 
   private def forwardRequest(request: ScrapingRequest): Unit = {
     val id = request.url
-    if(!persons.contains(id) && !scraping.contains(id)) { // persons.size <= 100
+    val matches = request.relationship match {
+      case scraper.pathMatcher(_*) => true
+      case _ => false
+    }
+    if(!persons.contains(id) && !scraping.contains(id) && matches) { // persons.size <= 100
       pending += 1
       scraping += id
       scraper.scraperRouter ! request
@@ -34,17 +38,17 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
     case request: ScrapingRequest => // Initial and subsequent requests
       forwardRequest(request)
 
-    case result: ScrapingResult => // Callback
-      println(s"[I: ${persons.size}, F: ${families.size}, I': ${pending}] Received ${result.result.person}")
+    case ScrapingResult(url, result, relationship) => // Callback
+      println(s"[I: ${persons.size}, F: ${families.size}, I': ${pending}] Received ${result.person}")
       pending -= 1
-      scraping -= result.url
+      scraping -= url
 
-      personOrder :+= result.url
-      persons += result.url -> result.result.person
+      personOrder :+= url
+      persons += url -> result.person
 
-      val familyOpt = if(result.result.fatherUrl.isDefined && result.result.motherUrl.isDefined) Seq(Family(result.result.fatherUrl.get, result.result.motherUrl.get, Seq.empty, Seq(result.url))) else Seq.empty
+      val familyOpt = if(result.fatherUrl.isDefined && result.motherUrl.isDefined) Seq(Family(result.fatherUrl.get, result.motherUrl.get, Seq.empty, Seq(url))) else Seq.empty
 
-      for(family <- result.result.families ++ familyOpt) { // TODO
+      for(family <- result.families ++ familyOpt) { // TODO
         val key = (family.father, family.mother)
         if(families.contains(key)) { // Merge
           val other = families(key)
@@ -55,18 +59,13 @@ class ActorDataManager(scraper: GeneanetScraper) extends Actor {
         }
       }
 
-      val res = result.result
-      if(visitAncestors) {
-        Seq(res.fatherUrl, res.motherUrl).flatten.foreach(url => forwardRequest(ScrapingRequest(url)))
-      }
+      Seq(result.fatherUrl, result.motherUrl).flatten.foreach(url => forwardRequest(ScrapingRequest(url, relationship + TokenAncestor)))
 
-      if(visitDescendants) {
-        res.children.foreach(url => forwardRequest(ScrapingRequest(url)))
-      }
+      result.children.foreach(url => forwardRequest(ScrapingRequest(url, relationship + TokenDescendant)))
 
-      if(visitSpouse) {
-        res.families.flatMap(fam => Seq(fam.father, fam.mother)).foreach(url => forwardRequest(ScrapingRequest(url)))
-      }
+      // Note that spouses could be ancestors or descendants too, but in practice this should rarely occur because
+      // we visit them at the end.
+      result.families.flatMap(fam => Seq(fam.father, fam.mother)).foreach(url => forwardRequest(ScrapingRequest(url, relationship + TokenSpouse)))
 
       checkDone()
     case fail: ScrapingFailure =>

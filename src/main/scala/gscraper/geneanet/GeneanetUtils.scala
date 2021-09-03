@@ -92,8 +92,12 @@ object GeneanetUtils {
       val lis = e >> elementList("ul.fiche_union > li")
       lis.map{ li =>
         // TODO divorce
+        def isEmFirst(e: Element): Boolean = {
+          val parent = e.parent.get.parent.get
+          parent.hasAttr("class") && parent.attr("class").contains("fiche_union")
+        }
         val eventOpt = li.text.split(" ", 2).head.stripSuffix(",") match {
-          case "Marié" | "Mariée" | "Relation" | "Contrat" => Some((li >?> text(":not(a) > em")).map(mar => parseEventRaw(mar, ", ", EventMarriage)).getOrElse(Event(EventMarriage, NoDate, None)))
+          case "Marié" | "Mariée" | "Fiancé" | "Fiancée" | "Relation" | "Contrat" => Some((li >?> element(":not(a) > em")).filter(isEmFirst).map(_.text).map(mar => parseEventRaw(mar, ", ", EventMarriage)).getOrElse(Event(EventMarriage, NoDate, None)))
           case "Avec" => None
         }
         val spouse = firstPersonLink(li)
@@ -119,12 +123,12 @@ object GeneanetUtils {
     val jsonMetadata = (doc >> elementList("script")).map(_.innerHtml).filter(_.contains("MODE_VISITOR")).head
       .split("elements, ")(1).split("\\);").head
       .parseJson.asJsObject
-    val medias = jsonMetadata.fields("gntGeneweb").asJsObject.fields("media").convertTo[Seq[JsObject]].map { mediaData =>
+    val medias = jsonMetadata.fields("gntGeneweb").asJsObject.fields.get("media").map(_.convertTo[Seq[JsObject]].map { mediaData =>
       val srcRaw = mediaData.fields("src").convertTo[String]
       assert(srcRaw.startsWith("//gw.geneanet.org/") && srcRaw.matches(".*/medium\\.(jpg|JPG|png|PNG)\\?t=\\d+$"), srcRaw) // Hackish
       val src = "https:" + srcRaw.split("\\?").head.replace("/medium.", "/normal.")
       Media(mediaData.fields("title").convertTo[String], src)
-    }
+    }).toSeq.flatten
 
     val person = Person(url, name, surname, sex, eventsFlat, otherInformations, medias)
 

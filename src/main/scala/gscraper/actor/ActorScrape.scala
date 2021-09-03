@@ -14,7 +14,7 @@ class ActorScrape(scraper: GeneanetScraper) extends Actor {
   override def receive: Receive = {
     case request: ScrapingRequest =>
       Try(GeneanetUtils.scrape(request.url, scraper.buildRequest)) match {
-        case Success(result) => scraper.dataKeeper ! ScrapingResult(request.url, result)
+        case Success(result) => scraper.dataKeeper ! ScrapingResult(request.url, result, request.relationship)
         case Failure(ex) => scraper.dataKeeper ! ScrapingFailure(request.url, ex)
       }
   }
