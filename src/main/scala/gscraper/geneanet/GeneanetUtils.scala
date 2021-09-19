@@ -39,15 +39,13 @@ object GeneanetUtils {
 
     // TODO (doc >?> element("div#person-title")).isEmpty
 
-    //println(doc)
-    val blacklistTitle = (doc >> elementList("h1")).find(e => e.text == "Navigation inhabituelle")
-    if(blacklistTitle.nonEmpty) {
-      val form = blacklistTitle.get.parent >> element(".panel > .row > div > form")
-      println(form.get.outerHtml)
-      throw new Exception("Captcha")
+    val personTitleElementOpt = doc >?> element("div#person-title")
+    if(personTitleElementOpt.isEmpty) {
+      println(doc)
+      throw new Exception("Firewall")
     }
+    val personTitleElement = personTitleElementOpt.get
 
-    val personTitleElement = doc >> element("div#person-title")
     val personGeneralElement = personTitleElement >> element("div.columns > h1")
 
     val columnElement = (doc >> element("h2 > span")).parent.get.parent.get
@@ -97,7 +95,19 @@ object GeneanetUtils {
           parent.hasAttr("class") && parent.attr("class").contains("fiche_union")
         }
         val eventOpt = li.text.split(" ", 2).head.stripSuffix(",") match {
-          case "Marié" | "Mariée" | "Fiancé" | "Fiancée" | "Relation" | "Contrat" => Some((li >?> element(":not(a) > em")).filter(isEmFirst).map(_.text).map(mar => parseEventRaw(mar, ", ", EventMarriage)).getOrElse(Event(EventMarriage, NoDate, None)))
+          case "Marié" | "Mariée" | "Fiancé" | "Fiancée" | "Relation" | "Contrat" =>
+            Some(
+              (li >?> element(":not(a) > em")).filter(isEmFirst).map(_.text).map { mar =>
+                Try(parseEventRaw(mar, ", ", EventMarriage)) match {
+                  case Success(event) => event
+                  case Failure(e) =>
+                    e.printStackTrace()
+                    println(s"Ignoring invalid date '$mar'. Please verify correctness (see above trace).")
+                    Event(EventMarriage, NoDate, None)
+                }
+
+              }.getOrElse(Event(EventMarriage, NoDate, None))
+            )
           case "Avec" => None
         }
         val spouse = firstPersonLink(li)
@@ -123,11 +133,15 @@ object GeneanetUtils {
     val jsonMetadata = (doc >> elementList("script")).map(_.innerHtml).filter(_.contains("MODE_VISITOR")).head
       .split("elements, ")(1).split("\\);").head
       .parseJson.asJsObject
-    val medias = jsonMetadata.fields("gntGeneweb").asJsObject.fields.get("media").map(_.convertTo[Seq[JsObject]].map { mediaData =>
+    val medias = jsonMetadata.fields("gntGeneweb").asJsObject.fields.get("media").map(_.convertTo[Seq[JsObject]].flatMap { mediaData =>
       val srcRaw = mediaData.fields("src").convertTo[String]
-      assert(srcRaw.startsWith("//gw.geneanet.org/") && srcRaw.matches(".*/medium\\.(jpg|JPG|png|PNG)\\?t=\\d+$"), srcRaw) // Hackish
-      val src = "https:" + srcRaw.split("\\?").head.replace("/medium.", "/normal.")
-      Media(mediaData.fields("title").convertTo[String], src)
+      if(srcRaw.startsWith("//www.geneanet.org/archives/")) {
+        None
+      } else {
+        assert(srcRaw.startsWith("//gw.geneanet.org/") && srcRaw.matches(".*/medium\\.(jpg|JPG|png|PNG)\\?t=\\d+$"), srcRaw) // Hackish
+        val src = "https:" + srcRaw.split("\\?").head.replace("/medium.", "/normal.")
+        Some(Media(mediaData.fields("title").convertTo[String], src))
+      }
     }).toSeq.flatten
 
     val person = Person(url, name, surname, sex, eventsFlat, otherInformations, medias)

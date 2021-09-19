@@ -16,7 +16,7 @@ class GeneanetScraper private(bootstrapUrl: String, cookieValue: String, userAge
   private[actor] val browser: JsoupBrowser = new JsoupBrowser(userAgent)
   private[actor] def buildRequest(url: String): HttpRequest =
     Http(url)
-      .cookies(HttpCookie.parse(cookieValue).asScala)
+      .header("Cookie", cookieValue)
       .header("User-Agent", userAgent)
 
   private val system = ActorSystem()
